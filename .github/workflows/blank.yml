@@ -5,7 +5,8 @@ name: Release Pipeline
 #  • pre-release  (manual trigger with `phase=pre`)
 #  • post-release (manual trigger with `phase=post` OR automatic on `push` tags v*.*.*)
 #
-# Each job handles its full “projects” list in a simple in‐script loop.
+# Each job loops over its entire “projects” list in a single script—no invalid
+# matrix syntax or deprecated apt-key calls.
 ################################################################################
 
 on:
@@ -54,11 +55,9 @@ jobs:
           printf ']' > repos.json
 
       - name: Install GitHub CLI
-        run: |
-          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-key C99B11DEB97541F0
-          sudo apt-add-repository https://cli.github.com/packages
-          sudo apt update
-          sudo apt install gh -y
+        uses: actions/setup-gh@v2
+        with:
+          version: latest
 
       - name: Create release branches & draft releases
         uses: actions/github-script@v6
@@ -147,7 +146,7 @@ jobs:
           # GITHUB_REF will be “refs/tags/v0.0.1” (for example)
           version="${GITHUB_REF#refs/tags/v}"
           echo "VERSION=${version}" >> $GITHUB_ENV
-          # For this sandbox, we’ll just use a single repo
+          # For this sandbox, we’ll just use one repo
           echo "REPOS=MadDevMax/sandbox-repo" >> $GITHUB_ENV
 
       - name: Split repos into JSON array
@@ -160,11 +159,9 @@ jobs:
           printf ']' > repos.json
 
       - name: Install GitHub CLI
-        run: |
-          sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-key C99B11DEB97541F0
-          sudo apt-add-repository https://cli.github.com/packages
-          sudo apt update
-          sudo apt install gh -y
+        uses: actions/setup-gh@v2
+        with:
+          version: latest
 
       - name: Publish Draft Releases & Push Tags
         uses: actions/github-script@v6
