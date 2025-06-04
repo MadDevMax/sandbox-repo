@@ -129,7 +129,8 @@ jobs:
           if [ "${{ github.event_name }}" = "push" ]; then
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
-            VERSION="${{ github.event.inputs.version }}"
+            INPUT_VER="${{ github.event.inputs.version }}"
+            VERSION="${INPUT_VER#v}"
           fi
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "RELEASE_TAG=v${VERSION}" >> $GITHUB_ENV
@@ -137,13 +138,20 @@ jobs:
           git fetch origin main
           git checkout main
 
-      - name: Create & push tag v${{ env.VERSION }}
+      - name: Create & push tag v${{ env.VERSION }} (skip if exists)
         run: |
-          set -e
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "$RELEASE_TAG"
-          git push origin "$RELEASE_TAG"
+
+          # Check if the tag already exists on origin
+          if git ls-remote --exit-code --tags origin "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "⚠️ Tag '$RELEASE_TAG' already exists on remote; skipping creation."
+          else
+            echo "📦 Creating and pushing tag '$RELEASE_TAG'..."
+            git tag "$RELEASE_TAG"
+            git push origin "$RELEASE_TAG"
+          fi
+        shell: bash
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
