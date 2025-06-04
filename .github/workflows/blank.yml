@@ -11,6 +11,7 @@ on:
         required: true
 
   push:
+    # Automatically run post-release whenever you push a tag "vX.Y.Z"
     tags:
       - 'v*.*.*'
 
@@ -18,6 +19,9 @@ permissions:
   contents: write
 
 jobs:
+  ##############################################################################
+  # PRE-RELEASE: create release/<version> branch from develop + draft release
+  ##############################################################################
   pre-release:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'pre' }}
     runs-on: ubuntu-latest
@@ -40,16 +44,17 @@ jobs:
             const newBranch = `release/${version}`;
             const { owner, repo } = context.repo;
 
-            // Check if branch already exists:
+            // 1. Check if branch already exists:
             try {
               await github.rest.git.getRef({ owner, repo, ref: `heads/${newBranch}` });
               core.setFailed(`Branch '${newBranch}' already exists.`);
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
+              // 404 means branch does not exist → proceed
             }
 
-            // Get SHA of develop:
+            // 2. Get SHA of develop:
             const { data: developRef } = await github.rest.git.getRef({
               owner,
               repo,
@@ -57,7 +62,7 @@ jobs:
             });
             const developSha = developRef.object.sha;
 
-            // Create new branch:
+            // 3. Create new branch:
             await github.rest.git.createRef({
               owner,
               repo,
@@ -75,16 +80,17 @@ jobs:
             const tagName = `v${version}`;
             const { owner, repo } = context.repo;
 
-            // Check if a release with this tag already exists:
+            // 1. Check if a release with this tag already exists:
             try {
               await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
               core.setFailed(`Release with tag '${tagName}' already exists.`);
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
+              // 404 → no existing release → continue
             }
 
-            // Create draft release:
+            // 2. Create draft release:
             await github.rest.repos.createRelease({
               owner,
               repo,
@@ -108,6 +114,9 @@ jobs:
             --data "$payload" \
             "${SLACK_WEBHOOK_URL}"
 
+  ##############################################################################
+  # POST-RELEASE: push tag + publish the draft release
+  ##############################################################################
   post-release:
     if: >
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
@@ -134,7 +143,7 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "RELEASE_TAG=v${VERSION}" >> $GITHUB_ENV
 
-          # Now switch to main so we can tag it
+          # Switch to main to tag
           git fetch origin main
           git checkout main
 
@@ -157,19 +166,29 @@ jobs:
             const tagName = `v${version}`;
             const { owner, repo } = context.repo;
 
-            // Fetch the draft release by tag:
-            const { data: release } = await github.rest.repos.getReleaseByTag({
-              owner,
-              repo,
-              tag: tagName
-            });
+            let release;
+            // 1. Try to fetch the draft release by tag:
+            try {
+              const resp = await github.rest.repos.getReleaseByTag({
+                owner,
+                repo,
+                tag: tagName
+              });
+              release = resp.data;
+            } catch (err) {
+              if (err.status === 404) {
+                core.setFailed(`No draft release found for tag '${tagName}'. Did you run pre-release?`);
+                return;
+              }
+              throw err;
+            }
 
             if (!release.draft) {
-              console.log(`Release ${tagName} is already published.`);
+              core.info(`Release ${tagName} is already published.`);
               return;
             }
 
-            // Publish (set draft=false) and add a default body:
+            // 2. Publish (set draft=false) and add a default body:
             await github.rest.repos.updateRelease({
               owner,
               repo,
