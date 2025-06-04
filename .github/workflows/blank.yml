@@ -36,12 +36,12 @@ jobs:
         uses: actions/checkout@v3
         with:
           ref: develop
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
 
       - name: Verify & create `release/${{ github.event.inputs.version }}` branch
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const version = "${{ github.event.inputs.version }}";
             const newBranch = `release/${version}`;
@@ -81,7 +81,7 @@ jobs:
       - name: Create a draft Release tagged v${{ github.event.inputs.version }}
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const version = "${{ github.event.inputs.version }}";
             const tagName = `v${version}`;
@@ -161,12 +161,12 @@ jobs:
           git tag "$RELEASE_TAG"
           git push origin "$RELEASE_TAG"
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
 
       - name: Publish the draft release via API
         uses: actions/github-script@v6
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.GH_TOKEN }}
           script: |
             const version = process.env.VERSION;
             const tagName = `v${version}`;
