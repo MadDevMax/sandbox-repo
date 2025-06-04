@@ -55,7 +55,7 @@ jobs:
           printf ']' > repos.json
 
       - name: Install GitHub CLI
-        uses: actions/setup-gh@v2
+        uses: cli/cli-action@v2
         with:
           version: latest
 
@@ -159,7 +159,7 @@ jobs:
           printf ']' > repos.json
 
       - name: Install GitHub CLI
-        uses: actions/setup-gh@v2
+        uses: cli/cli-action@v2
         with:
           version: latest
 
