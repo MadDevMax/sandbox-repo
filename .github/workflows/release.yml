@@ -1,14 +1,8 @@
 name: Release
 
-# ────────────────────────────────
-# 0) Explicitly grant permissions
-# ────────────────────────────────
 permissions:
-  contents: write   # allow creating/editing releases, uploading assets
+  contents: write   # ensure we can create/edit releases
 
-# ────────────────────────────────
-# 1) Event triggers
-# ────────────────────────────────
 on:
   push:
     tags:
@@ -35,4 +29,6 @@ jobs:
       - name: Publish Release
         uses: eregon/publish-release@v1
         with:
+          # ← add this “token” line:
+          token: ${{ secrets.GITHUB_TOKEN }}
           release_id: ${{ steps.create_release.outputs.id }}
