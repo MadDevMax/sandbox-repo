@@ -109,7 +109,7 @@ jobs:
   ##############################################################################
   # POST-RELEASE: push tag “v<version>” + publish the draft release
   ##############################################################################
-  post-release:
+   post-release:
     if: >
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'post')
@@ -147,33 +147,51 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish the draft release via API (handles 404)
+      - name: Debug & publish the draft release via API
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = process.env.VERSION;
-            const tagName = `v${version}`;
+            const possibleTags = [`v${version}`, version];
             const { owner, repo } = context.repo;
 
-            let release;
-            try {
-              const resp = await github.rest.repos.getReleaseByTag({
-                owner,
-                repo,
-                tag: tagName
-              });
-              release = resp.data;
-            } catch (err) {
-              if (err.status === 404) {
-                core.setFailed(`No draft release found for tag '${tagName}'. Did you run pre-release?`);
-                return;
+            // List existing release tags
+            const { data: allReleases } = await github.rest.repos.listReleases({
+              owner,
+              repo,
+              per_page: 100
+            });
+            console.log(">>> Existing release tags:", allReleases.map(r => r.tag_name));
+
+            let release = null;
+            for (const tagName of possibleTags) {
+              try {
+                const resp = await github.rest.repos.getReleaseByTag({
+                  owner,
+                  repo,
+                  tag: tagName
+                });
+                if (resp.data.draft) {
+                  release = resp.data;
+                  console.log(`✅ Found draft under tag '${tagName}'.`);
+                  break;
+                } else {
+                  console.log(`ℹ️ Release '${tagName}' exists but is not a draft.`);
+                }
+              } catch (err) {
+                if (err.status === 404) {
+                  console.log(`⚠️ No release found for tag '${tagName}'.`);
+                  continue;
+                }
+                throw err;
               }
-              throw err;
             }
 
-            if (!release.draft) {
-              console.log(`Release ${tagName} is already published.`);
+            if (!release) {
+              core.setFailed(
+                `Could not find any draft release under tags: ${possibleTags.join(", ")}.`
+              );
               return;
             }
 
@@ -184,7 +202,7 @@ jobs:
               draft: false,
               body: `### Changes in v${version}\n\n- (Auto-generated placeholder)\n`
             });
-            console.log(`✅ Published release '${tagName}'.`);
+            console.log(`✅ Published release '${release.tag_name}'.`);
 
       - name: Notify in Slack (optional)
         if: ${{ env.SLACK_WEBHOOK_URL != '' }}
