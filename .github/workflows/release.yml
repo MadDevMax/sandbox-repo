@@ -1,14 +1,8 @@
 name: Release
 
-# ────────────────────────────────
-# 0) Grant Permissions to GITHUB_TOKEN
-# ────────────────────────────────
 permissions:
-  contents: write   # allows creating/editing releases & uploading assets
+  contents: write   # allow creating/editing releases & uploading assets
 
-# ────────────────────────────────
-# 1) Trigger on tag push OR manual dispatch
-# ────────────────────────────────
 on:
   push:
     tags:
@@ -24,34 +18,24 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
-    # If manually triggered → use inputs.tag, otherwise use the pushed tag name
     env:
+      # If manually triggered → use inputs.tag, otherwise use the pushed tag name
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
 
     steps:
-      # ────────────────────────────────
-      # 2.1) Checkout
-      # ────────────────────────────────
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v3
 
-      # ────────────────────────────────
-      # 2.2) Create a draft GitHub Release
-      #     (outputs: create_release.outputs.id)
-      # ────────────────────────────────
       - name: Create Draft Release
         id: create_release
         uses: actions/create-release@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag_name: ${{ env.RELEASE_TAG }}
           release_name: Release ${{ env.RELEASE_TAG }}
           draft: true
           prerelease: false
-        # Notice: No 'env:' here. The action uses 'with:'.
 
-      # ────────────────────────────────
-      # 2.3) Upload an asset to that draft
-      # ────────────────────────────────
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
         with:
@@ -60,9 +44,6 @@ jobs:
           asset_name: my-artifact.zip
           asset_content_type: application/zip
 
-      # ────────────────────────────────
-      # 2.4) Publish the draft → must pass token & release_id under "with:"
-      # ────────────────────────────────
       - name: Publish Release
         uses: eregon/publish-release@v1
         with:
