@@ -30,7 +30,7 @@ jobs:
         id: create_release
         uses: actions/create-release@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
           tag_name: ${{ env.RELEASE_TAG }}
           release_name: Release ${{ env.RELEASE_TAG }}
           draft: true
@@ -47,5 +47,5 @@ jobs:
       - name: Publish Release
         uses: eregon/publish-release@v1
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GH_TOKEN }}
           release_id: ${{ steps.create_release.outputs.id }}
