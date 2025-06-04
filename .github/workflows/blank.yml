@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 0.0.2)'
+        description: 'Version to release (e.g. 0.0.3)'
         required: true
       phase:
         description: '“pre” or “post”'
@@ -71,25 +71,28 @@ jobs:
           script: |
             const version = "${{ github.event.inputs.version }}";
             const tagName = `v${version}`;
+            const releaseName = `Draft: v${version}`;
             const { owner, repo } = context.repo;
 
+            // Ensure no draft with this tag already exists
             try {
-              await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
+              const resp = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
               core.setFailed(`Release with tag '${tagName}' already exists.`);
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
             }
 
+            // Create draft release with name "Draft: v<version>"
             await github.rest.repos.createRelease({
               owner,
               repo,
               tag_name: tagName,
-              name: `Draft: v${version}`,
+              name: releaseName,
               draft: true,
               prerelease: false
             });
-            console.log(`✅ Created draft release '${tagName}'.`);
+            console.log(`✅ Created draft release '${releaseName}'.`);
 
   ##############################################################################
   # POST-RELEASE: push tag “v<version>” + publish the draft release
@@ -136,31 +139,29 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Find draft release ID for tag v${{ env.VERSION }}
+      - name: Find draft release ID by name
         id: find_release
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = process.env.VERSION;
-            const tagName = `v${version}`;
+            const releaseName = `Draft: v${version}`;
             const { owner, repo } = context.repo;
 
-            let release;
-            try {
-              const resp = await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
-              release = resp.data;
-            } catch (err) {
-              core.setFailed(`No draft release found for tag '${tagName}'.`);
+            // List releases and find one whose name matches "Draft: v<version>"
+            const { data: allReleases } = await github.rest.repos.listReleases({
+              owner,
+              repo,
+              per_page: 100
+            });
+
+            const draft = allReleases.find(r => r.name === releaseName && r.draft);
+            if (!draft) {
+              core.setFailed(`No draft release found with name '${releaseName}'.`);
               return;
             }
-
-            if (!release.draft) {
-              core.setFailed(`Release '${tagName}' is not a draft.`);
-              return;
-            }
-
-            return { release_id: release.id };
+            return { release_id: draft.id };
 
       - name: Publish draft release
         uses: eregon/publish-release@v1
