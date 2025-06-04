@@ -37,8 +37,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // SANITIZE VERSION INPUT (REMOVE 'v' PREFIX)
-            const version = "${{ github.event.inputs.version }}".replace(/^v/, '');
+            const version = "${{ github.event.inputs.version }}";
             const newBranch = `release/${version}`;
             const { owner, repo } = context.repo;
 
@@ -70,8 +69,7 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            // SANITIZE VERSION INPUT (REMOVE 'v' PREFIX)
-            const version = "${{ github.event.inputs.version }}".replace(/^v/, '');
+            const version = "${{ github.event.inputs.version }}";
             const tagName = `v${version}`;
             const { owner, repo } = context.repo;
 
@@ -92,92 +90,3 @@ jobs:
               prerelease: false
             });
             console.log(`✅ Created draft release '${tagName}'.`);
-
-  ##############################################################################
-  # POST-RELEASE: push tag “v<version>” + publish the draft release
-  ##############################################################################
-  post-release:
-    if: >
-      (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'post')
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Determine version & checkout main
-        id: vars
-        run: |
-          if [ "${{ github.event_name }}" = "push" ]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-          else
-            INPUT_VER="${{ github.event.inputs.version }}"
-            # SANITIZE VERSION INPUT (REMOVE 'v' PREFIX)
-            VERSION="${INPUT_VER//v/}"
-          fi
-          echo "VERSION=${VERSION}" >> $GITHUB_ENV
-          echo "RELEASE_TAG=v${VERSION}" >> $GITHUB_ENV
-
-          git fetch origin main
-          git checkout main
-
-      - name: Create & push tag v${{ env.VERSION }} (skip if exists)
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-          if git ls-remote --exit-code --tags origin "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "⚠️ Tag '$RELEASE_TAG' already exists; skipping."
-          else
-            git tag "$RELEASE_TAG"
-            git push origin "$RELEASE_TAG"
-          fi
-        shell: bash
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Publish the draft release via API
-        uses: actions/github-script@v6
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const version = process.env.VERSION;
-            const possibleTags = [`v${version}`, version];
-            const { owner, repo } = context.repo;
-
-            let release = null;
-            for (const tagName of possibleTags) {
-              try {
-                const resp = await github.rest.repos.getReleaseByTag({
-                  owner,
-                  repo,
-                  tag: tagName
-                });
-                if (resp.data.draft) {
-                  release = resp.data;
-                  break;
-                }
-              } catch (err) {
-                if (err.status === 404) continue;
-                throw err;
-              }
-            }
-
-            if (!release) {
-              core.setFailed(
-                `Could not find any draft release under tags: ${possibleTags.join(", ")}.`
-              );
-              return;
-            }
-
-            await github.rest.repos.updateRelease({
-              owner,
-              repo,
-              release_id: release.id,
-              draft: false,
-              body: `### Changes in v${version}\n\n- (Auto-generated placeholder)\n`
-            });
-            console.log(`✅ Published release '${release.tag_name}'.`);
