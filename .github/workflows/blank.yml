@@ -4,14 +4,13 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 0.0.1)'
+        description: 'Version to release (e.g. 0.0.2)'
         required: true
       phase:
         description: '“pre” or “post”'
         required: true
 
   push:
-    # Automatically run post-release whenever you push a tag "vX.Y.Z"
     tags:
       - 'v*.*.*'
 
@@ -20,7 +19,7 @@ permissions:
 
 jobs:
   ##############################################################################
-  # PRE-RELEASE: create release/<version> branch from develop + draft release
+  # PRE-RELEASE: create release/<version> branch + draft release “v<version>”
   ##############################################################################
   pre-release:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'pre' }}
@@ -35,7 +34,7 @@ jobs:
           ref: develop
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Verify & create `release/${{ github.event.inputs.version }}` branch
+      - name: Verify & create release/${{ github.event.inputs.version }} branch
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -44,17 +43,14 @@ jobs:
             const newBranch = `release/${version}`;
             const { owner, repo } = context.repo;
 
-            // 1. Check if branch already exists:
             try {
               await github.rest.git.getRef({ owner, repo, ref: `heads/${newBranch}` });
               core.setFailed(`Branch '${newBranch}' already exists.`);
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
-              // 404 means branch does not exist → proceed
             }
 
-            // 2. Get SHA of develop:
             const { data: developRef } = await github.rest.git.getRef({
               owner,
               repo,
@@ -62,7 +58,6 @@ jobs:
             });
             const developSha = developRef.object.sha;
 
-            // 3. Create new branch:
             await github.rest.git.createRef({
               owner,
               repo,
@@ -71,7 +66,7 @@ jobs:
             });
             console.log(`✅ Created branch 'release/${version}' from develop.`);
 
-      - name: Create a draft Release tagged v${{ github.event.inputs.version }}
+      - name: Create draft release v${{ github.event.inputs.version }}
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -80,17 +75,14 @@ jobs:
             const tagName = `v${version}`;
             const { owner, repo } = context.repo;
 
-            // 1. Check if a release with this tag already exists:
             try {
               await github.rest.repos.getReleaseByTag({ owner, repo, tag: tagName });
               core.setFailed(`Release with tag '${tagName}' already exists.`);
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
-              // 404 → no existing release → continue
             }
 
-            // 2. Create draft release:
             await github.rest.repos.createRelease({
               owner,
               repo,
@@ -115,7 +107,7 @@ jobs:
             "${SLACK_WEBHOOK_URL}"
 
   ##############################################################################
-  # POST-RELEASE: push tag + publish the draft release
+  # POST-RELEASE: push tag “v<version>” + publish the draft release
   ##############################################################################
   post-release:
     if: >
@@ -135,7 +127,6 @@ jobs:
         id: vars
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            # github.ref looks like "refs/tags/v0.0.1"
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
             VERSION="${{ github.event.inputs.version }}"
@@ -143,7 +134,6 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "RELEASE_TAG=v${VERSION}" >> $GITHUB_ENV
 
-          # Switch to main to tag
           git fetch origin main
           git checkout main
 
@@ -157,7 +147,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Publish the draft release via API
+      - name: Publish the draft release via API (handles 404)
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -167,7 +157,6 @@ jobs:
             const { owner, repo } = context.repo;
 
             let release;
-            // 1. Try to fetch the draft release by tag:
             try {
               const resp = await github.rest.repos.getReleaseByTag({
                 owner,
@@ -184,11 +173,10 @@ jobs:
             }
 
             if (!release.draft) {
-              core.info(`Release ${tagName} is already published.`);
+              console.log(`Release ${tagName} is already published.`);
               return;
             }
 
-            // 2. Publish (set draft=false) and add a default body:
             await github.rest.repos.updateRelease({
               owner,
               repo,
