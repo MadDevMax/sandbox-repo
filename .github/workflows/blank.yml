@@ -24,8 +24,6 @@ jobs:
   pre-release:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'pre' }}
     runs-on: ubuntu-latest
-    env:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - name: Checkout develop branch
@@ -93,19 +91,6 @@ jobs:
             });
             console.log(`✅ Created draft release '${tagName}'.`);
 
-      - name: Notify in Slack (optional)
-        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        run: |
-          version="${{ github.event.inputs.version }}"
-          text=":rocket: *Pre-Release – Version ${version}*\n"
-          text+="Created branch \`release/${version}\` and draft release \`v${version}\`.\n"
-          text+="Please verify on staging. @here"
-
-          payload=$(jq -n --arg txt "$text" '{text: $txt}')
-          curl -X POST -H 'Content-Type: application/json' \
-            --data "$payload" \
-            "${SLACK_WEBHOOK_URL}"
-
   ##############################################################################
   # POST-RELEASE: push tag “v<version>” + publish the draft release
   ##############################################################################
@@ -114,8 +99,6 @@ jobs:
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'post')
     runs-on: ubuntu-latest
-    env:
-      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
 
     steps:
       - name: Checkout repository
@@ -143,11 +126,9 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-          # Check if the tag already exists on origin
           if git ls-remote --exit-code --tags origin "$RELEASE_TAG" >/dev/null 2>&1; then
-            echo "⚠️ Tag '$RELEASE_TAG' already exists on remote; skipping creation."
+            echo "⚠️ Tag '$RELEASE_TAG' already exists; skipping."
           else
-            echo "📦 Creating and pushing tag '$RELEASE_TAG'..."
             git tag "$RELEASE_TAG"
             git push origin "$RELEASE_TAG"
           fi
@@ -155,7 +136,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Debug & publish the draft release via API
+      - name: Publish the draft release via API
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -163,14 +144,6 @@ jobs:
             const version = process.env.VERSION;
             const possibleTags = [`v${version}`, version];
             const { owner, repo } = context.repo;
-
-            // List existing release tags
-            const { data: allReleases } = await github.rest.repos.listReleases({
-              owner,
-              repo,
-              per_page: 100
-            });
-            console.log(">>> Existing release tags:", allReleases.map(r => r.tag_name));
 
             let release = null;
             for (const tagName of possibleTags) {
@@ -182,16 +155,10 @@ jobs:
                 });
                 if (resp.data.draft) {
                   release = resp.data;
-                  console.log(`✅ Found draft under tag '${tagName}'.`);
                   break;
-                } else {
-                  console.log(`ℹ️ Release '${tagName}' exists but is not a draft.`);
                 }
               } catch (err) {
-                if (err.status === 404) {
-                  console.log(`⚠️ No release found for tag '${tagName}'.`);
-                  continue;
-                }
+                if (err.status === 404) continue;
                 throw err;
               }
             }
@@ -211,16 +178,3 @@ jobs:
               body: `### Changes in v${version}\n\n- (Auto-generated placeholder)\n`
             });
             console.log(`✅ Published release '${release.tag_name}'.`);
-
-      - name: Notify in Slack (optional)
-        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
-        run: |
-          version="${{ env.VERSION }}"
-          text=":tada: *Post-Release – Version ${version} is now live!* :sparkles:\n"
-          text+="- <https://github.com/${{ github.repository }}/releases/tag/v${version}|${{ github.repository }}>\n"
-          text+="\nPlease run any post-release tasks (migrations, cache purges). @here"
-
-          payload=$(jq -n --arg txt "$text" '{text: $txt}')
-          curl -X POST -H 'Content-Type: application/json' \
-            --data "$payload" \
-            "${SLACK_WEBHOOK_URL}"
