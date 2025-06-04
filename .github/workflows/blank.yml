@@ -1,13 +1,11 @@
 name: Release Pipeline
 
 ################################################################################
-# Two “phases”:
-#  • pre-release (manual trigger with `phase=pre`)
+# Two phases:
+#  • pre-release  (manual trigger with `phase=pre`)
 #  • post-release (manual trigger with `phase=post` OR automatic on `push` tags v*.*.*)
 #
-# In this simplified version, each job (pre-release / post-release) handles 
-# its entire list of repos in a single script loop, so there’s no invalid
-# `needs.[matrix]` or `strategy` to worry about.
+# Each job handles its full “projects” list in a simple in‐script loop.
 ################################################################################
 
 on:
@@ -24,14 +22,14 @@ on:
         required: true
 
   push:
-    # Automatically run “post-release” whenever a tag like “v0.0.1” is pushed
+    # Automatically run post-release whenever a tag like “v0.0.1” is pushed
     tags:
       - 'v*.*.*'
 
-################################################################################
-# PRE-RELEASE JOB
-################################################################################
 jobs:
+  ##############################################################################
+  # PRE-RELEASE JOB
+  ##############################################################################
   pre-release:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'pre' }}
     runs-on: ubuntu-latest
@@ -124,10 +122,9 @@ jobs:
             --data "$payload" \
             "${SLACK_WEBHOOK_URL}"
 
-
-################################################################################
-# POST-RELEASE JOB
-################################################################################
+  ##############################################################################
+  # POST-RELEASE JOB
+  ##############################################################################
   post-release:
     if: >
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
@@ -147,9 +144,10 @@ jobs:
       - name: Infer version from tag (push mode)
         if: github.event_name == 'push'
         run: |
-          version="${{ github.ref#refs/tags/v }}"
+          # GITHUB_REF will be “refs/tags/v0.0.1” (for example)
+          version="${GITHUB_REF#refs/tags/v}"
           echo "VERSION=${version}" >> $GITHUB_ENV
-          # For this sandbox, we only need one repo
+          # For this sandbox, we’ll just use a single repo
           echo "REPOS=MadDevMax/sandbox-repo" >> $GITHUB_ENV
 
       - name: Split repos into JSON array
