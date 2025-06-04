@@ -1,21 +1,10 @@
 name: Release Pipeline
 
-################################################################################
-# This workflow has two “phases”:
-#   • pre-release (manual trigger with `phase=pre`)
-#   • post-release (manual trigger with `phase=post` OR automatic on `push` tags v*.*.*)
-#
-# To test on this sandbox:
-#   • We’ll use inputs: version = 0.0.1, projects = MadDevMax/sandbox-repo
-#   • Make sure you created a `develop` branch already (see Step 1).
-#
-################################################################################
-
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version to release (e.g. 0.0.1)'
+        description: 'Version to release (e.g. 2.31.0)'
         required: true
       projects:
         description: 'Comma-separated list of GitHub repo slugs (org/repo1,org/repo2)'
@@ -25,7 +14,7 @@ on:
         required: true
 
   push:
-    # Automatically run “post-release” whenever a tag like “v0.0.1” is pushed
+    # This triggers post-release automatically when you push a tag like v2.31.0
     tags:
       - 'v*.*.*'
 
@@ -34,7 +23,7 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'pre' }}
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}        # GitHub token with repo scope
       SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
     steps:
       - name: Parse inputs
@@ -42,7 +31,7 @@ jobs:
           echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
           echo "REPOS=${{ github.event.inputs.projects }}" >> $GITHUB_ENV
 
-      - name: Split repos into JSON array
+      - name: Split repos into matrix
         id: matrix
         run: |
           IFS=',' read -r -a arr <<< "${REPOS}"
@@ -53,7 +42,7 @@ jobs:
           printf ']'
           > repos.json
 
-      - name: Set up matrix output
+      - name: Set up matrix
         uses: actions/github-script@v6
         id: expand
         with:
@@ -63,14 +52,24 @@ jobs:
         outputs:
           matrix: ${{ steps.expand.outputs.matrix }}
 
+      - name: Checkout GH CLI
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+
       - name: Install GitHub CLI
         run: |
           sudo apt-key adv --keyserver keyserver.ubuntu.com --recv-key C99B11DEB97541F0
           sudo apt-add-repository https://cli.github.com/packages
           sudo apt update
           sudo apt install gh -y
+        if: always()
 
       - name: Run Pre-Release for Each Repo
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # needed if you want to fetch all branches later
+      - name: Create release branches & draft releases
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GH_TOKEN }}
@@ -79,32 +78,33 @@ jobs:
             const repos = JSON.parse(require('fs').readFileSync('repos.json', 'utf8'));
 
             for (const fullRepo of repos) {
-              console.log(`--- Processing ${fullRepo} for pre-release v${version} ---`);
+              console.log(--- Processing ${fullRepo} for pre-release v${version} ---);
 
-              // 1. Clone the repo
-              const tmpDir = `/tmp/repo-${fullRepo.replace('/', '-')}`;
-              exec(`rm -rf ${tmpDir} && mkdir -p ${tmpDir}`);
+              // 1. Clone the repo locally
+              const tmpDir = /tmp/repo-${fullRepo.replace('/', '-')};
+              exec(rm -rf ${tmpDir} && mkdir -p ${tmpDir});
               process.chdir(tmpDir);
-              exec(`git clone https://x-access-token:${process.env.GH_TOKEN}@github.com/${fullRepo}.git .`);
+              exec(git clone https://x-access-token:${process.env.GH_TOKEN}@github.com/${fullRepo}.git .);
 
-              // 2. Create “release/<version>” only if it doesn’t exist
-              const branchName = `release/${version}`;
-              const exists = exec(`git ls-remote --exit-code origin refs/heads/${branchName}`, { silent: true, ignoreReturnCode: true }).exitCode === 0;
+              // 2. Check if release/… exists
+              const branchName = release/${version};
+              const exists = exec(git ls-remote --exit-code origin refs/heads/${branchName}, { silent: true, ignoreReturnCode: true }).exitCode === 0;
               if (exists) {
-                core.setFailed(`Branch ${branchName} already exists in ${fullRepo}`);
+                core.setFailed(Branch ${branchName} already exists in ${fullRepo});
                 return;
               }
 
-              // 3. Branch off of develop
-              exec(`git fetch origin develop`);
-              exec(`git checkout -b ${branchName} origin/develop`);
-              exec(`git push origin ${branchName}`);
+              // 3. Create the branch from develop
+              exec(git fetch origin develop);
+              exec(git checkout -b ${branchName} origin/develop);
+              exec(git push origin ${branchName});
 
-              // 4. Create a draft GitHub Release (tagged “v<version>”) in draft mode
-              const releaseTag = `v${version}`;
-              exec(`gh release create ${releaseTag} --repo ${fullRepo} --title "Draft: ${releaseTag}" --draft`);
+              // 4. Create a draft release
+              // We name the tag e.g. "v2.31.0" but on a “release” branch, you might prefer no “v” prefix
+              const releaseTag = v${version};
+              exec(gh release create ${releaseTag} --repo ${fullRepo} --title "Draft: ${releaseTag}" --draft);
 
-              console.log(`✅ Created branch ${branchName} and draft release ${releaseTag} for ${fullRepo}`);
+              console.log(✅ Created branch ${branchName} and draft release ${releaseTag} for ${fullRepo});
             }
 
       - name: Notify Team in Slack (Pre-Release)
@@ -113,7 +113,8 @@ jobs:
           repos=${{ env.REPOS }}
           IFS=',' read -r -a arr <<< "${repos}"
 
-          text=":rocket: *Pre-Release – Version ${version}*\n"
+          # Build a simple text message
+          text=":rocket: *Pre-Release *– Version ${version}*\n"
           text+="Branches created and deployed to staging for:\n"
           for repo in "${arr[@]}"; do
             text+="- ${repo}: release/${version} (draft release created)\n"
@@ -125,8 +126,8 @@ jobs:
             --data "$payload" \
             "${SLACK_WEBHOOK_URL}"
     strategy:
-      matrix: ${{ fromJson(needs.expand.outputs.matrix) }}
-    needs: [expand]
+      matrix: ${{ fromJson(needs.[matrix].outputs.matrix) }}
+    needs: [matrix]
 
   post-release:
     if: >
@@ -146,10 +147,17 @@ jobs:
       - name: Infer version from tag (push mode)
         if: github.event_name == 'push'
         run: |
+          # github.ref is "refs/tags/v2.31.0"
           version="${{ github.ref#refs/tags/v }}"
           echo "VERSION=${version}" >> $GITHUB_ENV
-          # For testing, we’ll just hardcode this single-repo again:
-          echo "REPOS=MadDevMax/sandbox-repo" >> $GITHUB_ENV
+          # You could have a mapping file to know which repos to update, or 
+          # set REPOS in a default env var if it's a monorepo
+          echo "REPOS=org/apps-api,org/web-frontend" >> $GITHUB_ENV
+
+      - name: Setup GitHub CLI
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
 
       - name: Install GitHub CLI
         run: |
@@ -157,8 +165,9 @@ jobs:
           sudo apt-add-repository https://cli.github.com/packages
           sudo apt update
           sudo apt install gh -y
+        if: always()
 
-      - name: Split repos into JSON array
+      - name: Split repos into JSON
         run: |
           IFS=',' read -r -a arr <<< "${REPOS}"
           printf '["'"${arr[0]}"'"'
@@ -175,30 +184,36 @@ jobs:
           script: |
             const version = process.env.VERSION;
             const repos = JSON.parse(require('fs').readFileSync('repos.json', 'utf8'));
-            const tagName = `v${version}`;
+            const tagName = v${version};
 
             for (const fullRepo of repos) {
-              console.log(`=== Processing ${fullRepo} for post-release v${version} ===`);
+              console.log(=== Processing ${fullRepo} for post-release v${version} ===);
 
-              const tmpDir = `/tmp/repo-${fullRepo.replace('/', '-')}`;
-              exec(`rm -rf ${tmpDir} && mkdir -p ${tmpDir}`);
+              const tmpDir = /tmp/repo-${fullRepo.replace('/', '-')};
+              exec(rm -rf ${tmpDir} && mkdir -p ${tmpDir});
               process.chdir(tmpDir);
-              exec(`git clone https://x-access-token:${process.env.GH_TOKEN}@github.com/${fullRepo}.git .`);
+              exec(git clone https://x-access-token:${process.env.GH_TOKEN}@github.com/${fullRepo}.git .);
 
-              // 1. Checkout master, pull latest, push tags
-              exec(`git checkout master`);
-              exec(`git pull origin master`);
-              exec(`git push origin --tags`);
+              // 1. Checkout master, pull, push tags
+              exec(git checkout master);
+              exec(git pull origin master);
+              exec(git push origin --tags);
 
-              // 2. Publish the previously created draft
-              const notesFile = `/tmp/release-notes-${fullRepo.replace('/', '-')}.md`;
-              const noteContent = `### Changes in v${version}\n- (Auto-generated note: see commit history)\n`;
+              // 2. Publish the draft (find it by name)
+              // If you want to auto-generate release notes, you could do:
+              //   const changelog = exec(git log $(git describe --tags --abbrev=0 v${prevVersion})..HEAD --oneline)
+              //   // write to a file, then pass --notes-file path
+              //
+              // For now, just publish with a placeholder note.
+              const notesFile = /tmp/release-notes-${fullRepo.replace('/', '-')}.md;
+              const noteContent = ### Changes in v${version}\n- See CHANGELOG.md or commit history.\n;
               require('fs').writeFileSync(notesFile, noteContent);
 
-              exec(`gh release edit ${tagName} --repo ${fullRepo} --notes-file ${notesFile}`);
-              exec(`gh release publish ${tagName} --repo ${fullRepo}`);
+              // 3. Use gh to edit the draft to add notes, then publish
+              exec(gh release edit ${tagName} --repo ${fullRepo} --notes-file ${notesFile});
+              exec(gh release publish ${tagName} --repo ${fullRepo});
 
-              console.log(`✅ Published release ${tagName} for ${fullRepo}`);
+              console.log(✅ Published release ${tagName} for ${fullRepo});
             }
 
       - name: Notify Team in Slack (Post-Release)
@@ -207,8 +222,9 @@ jobs:
           repos=${{ env.REPOS }}
           IFS=',' read -r -a arr <<< "${repos}"
 
-          text=":tada: *Post-Release – Version ${version} is now live!*\n"
+          text=":tada: *Post-Release* – Version ${version} is now live!\n"
           for repo in "${arr[@]}"; do
+            # Construct GH Release URL: https://github.com/org/repo/releases/tag/v${version}
             text+="- <https://github.com/${repo}/releases/tag/v${version}|${repo}> ⟶ *Published*\n"
           done
           text+="\nPlease perform any post-release tasks (DB migrations, cache purges). @here"
