@@ -1,78 +1,55 @@
 name: Release
 
 # ────────────────────────────────
+# 0) Explicitly grant permissions
+# ────────────────────────────────
+permissions:
+  contents: write   # allow creating/editing releases, uploading assets
+
+# ────────────────────────────────
 # 1) Event triggers
 # ────────────────────────────────
 on:
-  # (A) Automatically when you push a git tag starting with “v” (e.g. v1.0.0)
   push:
     tags:
       - 'v*.*.*'
-
-  # (B) Manually via the Actions UI, with a required “tag” input
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Which tag should be released? (e.g. v1.2.3)'
+        description: 'Which tag to release?'
         required: true
-        default: 'v1.0.0' 
+        default: 'v0.0.1'
 
-# ────────────────────────────────
-# 2) Jobs
-# ────────────────────────────────
 jobs:
   release:
     runs-on: ubuntu-latest
 
-    # Compute a single RELEASE_TAG variable:
-    # • If triggered by workflow_dispatch → use github.event.inputs.tag  
-    # • Otherwise (when pushing a tag)     → use github.ref_name
     env:
+      # If manually triggered → use inputs.tag, otherwise use the pushed tag name
       RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.tag || github.ref_name }}
 
     steps:
-      # ────────────────────────────────
-      # 2.1) Checkout any branch (not strictly needed for publishing,
-      #      but allows github.ref_name to be populated in case of a push)
-      # ────────────────────────────────
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      # ────────────────────────────────
-      # 2.2) Create a draft release using RELEASE_TAG
-      # ────────────────────────────────
       - name: Create Draft Release
         id: create_release
         uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          # Use the computed RELEASE_TAG (either from inputs.tag or from pushed tag)
           tag_name: ${{ env.RELEASE_TAG }}
-          # You can customize as you like:
           release_name: Release ${{ env.RELEASE_TAG }}
           draft: true
           prerelease: false
 
-      # ────────────────────────────────
-      # 2.3) Upload any artifact (e.g. my-artifact.zip) to the draft
-      # ────────────────────────────────
       - name: Upload Release Asset
         uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./my-artifact.zip
           asset_name: my-artifact.zip
           asset_content_type: application/zip
 
-      # ────────────────────────────────
-      # 2.4) Publish the draft release (make it visible)
-      # ────────────────────────────────
       - name: Publish Release
         uses: eregon/publish-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           release_id: ${{ steps.create_release.outputs.id }}
