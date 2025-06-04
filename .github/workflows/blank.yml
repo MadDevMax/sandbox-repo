@@ -1,10 +1,7 @@
 name: Simple Single-Repo Release
 
-# This workflow has two jobs:
-#  • pre-release  (manual trigger, creates branch + draft release)
-#  • post-release (manual trigger or tag push, pushes the tag + publishes)
-#
-# No GitHub CLI needed; everything is done via the GitHub API.
+# Two jobs: pre-release and post-release.
+# No GitHub CLI—uses GitHub API via actions/github-script instead.
 
 on:
   workflow_dispatch:
@@ -17,39 +14,40 @@ on:
         required: true
 
   push:
-    # Automatically run post-release whenever you push a tag "v*.*.*"
+    # Automatically run post-release whenever you push a tag "vX.Y.Z"
     tags:
       - 'v*.*.*'
 
 permissions:
-  contents: write   # Needed to push branches/tags and create releases via API
+  contents: write   # Needed to push branches/tags and create/update releases
 
 jobs:
   ##############################################################################
-  # PRE-RELEASE: create a release/<version> branch from develop + draft release
+  # PRE-RELEASE: create release/<version> branch from develop + draft release
   ##############################################################################
   pre-release:
     if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'pre' }}
     runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
     steps:
-      - name: “Checkout develop branch”
+      - name: Checkout develop branch
         uses: actions/checkout@v3
         with:
-          # We want to create the new branch from “develop”:
           ref: develop
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: “Verify release branch doesn’t exist, then create it”
+      - name: Verify & create `release/${{ github.event.inputs.version }}` branch
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = "${{ github.event.inputs.version }}";
             const newBranch = `release/${version}`;
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
+            const { owner, repo } = context.repo;
 
-            // 1. Check if “release/<version>” ref already exists:
+            // Check if branch already exists:
             try {
               await github.rest.git.getRef({
                 owner,
@@ -60,10 +58,10 @@ jobs:
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
-              // 404 means the ref does not exist → good
+              // 404 means branch does not exist → proceed
             }
 
-            // 2. Get SHA of develop from which to branch:
+            // Get SHA of develop:
             const { data: developRef } = await github.rest.git.getRef({
               owner,
               repo,
@@ -71,7 +69,7 @@ jobs:
             });
             const developSha = developRef.object.sha;
 
-            // 3. Create new branch “release/<version>” at that SHA:
+            // Create new branch:
             await github.rest.git.createRef({
               owner,
               repo,
@@ -80,17 +78,16 @@ jobs:
             });
             console.log(`✅ Created branch 'release/${version}' from develop.`);
 
-      - name: “Create a draft GitHub Release tagged v<version>”
+      - name: Create a draft Release tagged v${{ github.event.inputs.version }}
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = "${{ github.event.inputs.version }}";
             const tagName = `v${version}`;
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
+            const { owner, repo } = context.repo;
 
-            // 1. Check if a release with this tag already exists:
+            // Check if a release with this tag already exists:
             try {
               await github.rest.repos.getReleaseByTag({
                 owner,
@@ -101,10 +98,10 @@ jobs:
               return;
             } catch (err) {
               if (err.status !== 404) throw err;
-              // 404 means no existing release → proceed
+              // 404 → no existing release → continue
             }
 
-            // 2. Create the draft release (with no body yet)
+            // Create draft release:
             await github.rest.repos.createRelease({
               owner,
               repo,
@@ -113,10 +110,10 @@ jobs:
               draft: true,
               prerelease: false
             });
-            console.log(`✅ Created draft release 'v${version}'.`);
+            console.log(`✅ Created draft release '${tagName}'.`);
 
-      - name: “Notify in Slack (optional)”
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+      - name: Notify in Slack (optional)
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
         run: |
           version="${{ github.event.inputs.version }}"
           text=":rocket: *Pre-Release – Version ${version}*\n"
@@ -126,22 +123,25 @@ jobs:
           payload=$(jq -n --arg txt "$text" '{text: $txt}')
           curl -X POST -H 'Content-Type: application/json' \
             --data "$payload" \
-            "${{ secrets.SLACK_WEBHOOK_URL }}"
+            "${SLACK_WEBHOOK_URL}"
 
   ##############################################################################
-  # POST-RELEASE: push the tag + publish the draft release
+  # POST-RELEASE: push tag + publish the draft release
   ##############################################################################
   post-release:
     if: >
       (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
       (github.event_name == 'workflow_dispatch' && github.event.inputs.phase == 'post')
     runs-on: ubuntu-latest
+    env:
+      SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
     steps:
-      - name: “Determine version & checkout main”
+      - name: Determine version & checkout main
         id: vars
         run: |
           if [ "${{ github.event_name }}" = "push" ]; then
-            # github.ref is like "refs/tags/v0.0.1"
+            # github.ref looks like "refs/tags/v0.0.1"
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
             VERSION="${{ github.event.inputs.version }}"
@@ -149,11 +149,11 @@ jobs:
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "RELEASE_TAG=v${VERSION}" >> $GITHUB_ENV
 
-          # Now checkout the 'main' branch so we can push a tag
+          # Now switch to main so we can tag it
           git fetch origin main
           git checkout main
 
-      - name: “Create and push tag v<version>”
+      - name: Create & push tag v${{ env.VERSION }}
         run: |
           set -e
           git config user.name "github-actions[bot]"
@@ -163,17 +163,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: “Publish the draft release via API”
+      - name: Publish the draft release via API
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = process.env.VERSION;
             const tagName = `v${version}`;
-            const owner = context.repo.owner;
-            const repo  = context.repo.repo;
+            const { owner, repo } = context.repo;
 
-            // 1. Get the draft release by tag
+            // Fetch the draft release by tag:
             const { data: release } = await github.rest.repos.getReleaseByTag({
               owner,
               repo,
@@ -181,11 +180,11 @@ jobs:
             });
 
             if (!release.draft) {
-              core.info(`Release ${tagName} is already published.`);
+              console.log(`Release ${tagName} is already published.`);
               return;
             }
 
-            // 2. Edit the release: set draft=false and add a default body
+            // Publish (set draft=false) and add a default body:
             await github.rest.repos.updateRelease({
               owner,
               repo,
@@ -195,8 +194,8 @@ jobs:
             });
             console.log(`✅ Published release '${tagName}'.`);
 
-      - name: “Notify in Slack (optional)”
-        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}
+      - name: Notify in Slack (optional)
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
         run: |
           version="${{ env.VERSION }}"
           text=":tada: *Post-Release – Version ${version} is now live!* :sparkles:\n"
@@ -206,4 +205,4 @@ jobs:
           payload=$(jq -n --arg txt "$text" '{text: $txt}')
           curl -X POST -H 'Content-Type: application/json' \
             --data "$payload" \
-            "${{ secrets.SLACK_WEBHOOK_URL }}"
+            "${SLACK_WEBHOOK_URL}"
