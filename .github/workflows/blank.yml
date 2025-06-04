@@ -37,7 +37,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const version = "${{ github.event.inputs.version }}";
+            // SANITIZE VERSION INPUT (REMOVE 'v' PREFIX)
+            const version = "${{ github.event.inputs.version }}".replace(/^v/, '');
             const newBranch = `release/${version}`;
             const { owner, repo } = context.repo;
 
@@ -69,7 +70,8 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const version = "${{ github.event.inputs.version }}";
+            // SANITIZE VERSION INPUT (REMOVE 'v' PREFIX)
+            const version = "${{ github.event.inputs.version }}".replace(/^v/, '');
             const tagName = `v${version}`;
             const { owner, repo } = context.repo;
 
@@ -113,7 +115,8 @@ jobs:
             VERSION="${GITHUB_REF#refs/tags/v}"
           else
             INPUT_VER="${{ github.event.inputs.version }}"
-            VERSION="${INPUT_VER#v}"
+            # SANITIZE VERSION INPUT (REMOVE 'v' PREFIX)
+            VERSION="${INPUT_VER//v/}"
           fi
           echo "VERSION=${VERSION}" >> $GITHUB_ENV
           echo "RELEASE_TAG=v${VERSION}" >> $GITHUB_ENV
